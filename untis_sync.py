@@ -4,8 +4,8 @@ import json
 import requests
 
 # Schuldaten festlegen
-SERVER = "://webuntis.com"
-SCHULE = "Mariannhiller-Gym"
+SERVER = os.environ.get("UNTIS_SERVER")
+SCHULE = os.environ.get("UNTIS_Schule")
 USER = os.environ.get("UNTIS_USER")
 PASSWORD = os.environ.get("UNTIS_PASSWORD")
 
