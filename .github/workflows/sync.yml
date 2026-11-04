@@ -1,0 +1,36 @@
+name: Untis Kalender Sync
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # Läuft täglich um 05:00 Uhr UTC
+  workflow_dispatch: # Erlaubt manuelles Starten per Klick
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v3
+
+      - name: Python einrichten
+        uses: actions/setup-python@v4
+        with:
+          python-python: '3.10'
+
+      - name: Abhängigkeiten installieren
+        run: |
+          pip install python-webuntis ics
+
+      - name: Skript ausführen
+        env:
+          UNTIS_USER: ${{ secrets.UNTIS_USER }}
+          UNTIS_PASSWORD: ${{ secrets.UNTIS_PASSWORD }}
+        run: python untis_sync.py
+
+      - name: Kalenderdatei auf GitHub aktualisieren
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add stundenplan.ics
+          git commit -m "Update Stundenplan" || exit 0
+          git push
