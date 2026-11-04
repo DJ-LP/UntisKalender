@@ -20,47 +20,65 @@ for prefix in ["https://", "http://"]:
         clean_server = clean_server[len(prefix):]
 clean_server = clean_server.split("/")[0]
 
-URL = f"https://{clean_server}/webuntis/jsonrpc.do?school={SCHULE}"
-print(f"Verbindung wird aufgebaut zu: {URL}")
-
 # WebUntis benötigt zwingend diese Header
 HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "KalenderSync"
 }
 
-def json_rpc(method, params={}, session_id=None):
+# Liste möglicher API-Pfade bei WebUntis
+PFADE_ZUM_TESTEN = [
+    f"https://{clean_server}/jsonrpc.do?school={SCHULE}",
+    f"https://{clean_server}/WebUntis/jsonrpc.do?school={SCHULE}",
+    f"https://{clean_server}/webuntis/jsonrpc.do?school={SCHULE}"
+]
+
+def json_rpc(url, method, params={}, session_id=None):
     payload = {
         "id": "1",
         "method": method,
         "params": params,
         "jsonrpc": "2.0"
     }
-    
     current_headers = HEADERS.copy()
     if session_id:
         current_headers["Cookie"] = f"JSESSIONID={session_id}"
         
-    res = requests.post(URL, json=payload, headers=current_headers)
-    
-    # Debug-Hilfe, falls kein gültiges JSON zurückkommt
+    res = requests.post(url, json=payload, headers=current_headers, timeout=10)
+    return res
+
+# 1. API-Endpunkt automatisch ermitteln via Login-Versuch
+aktuelle_url = None
+session_id = None
+login_daten = None
+
+print("Suche nach dem korrekten WebUntis API-Pfad...")
+for test_url in PFADE_ZUM_TESTEN:
     try:
-        return res.json()
+        print(f"Teste Pfad: {test_url}")
+        antwort = json_rpc(test_url, "authenticate", {"user": USER, "password": PASSWORD, "client": "KalenderSync"})
+        
+        # Wenn der Server valides JSON antwortet, haben wir den Pfad!
+        daten = antwort.json()
+        if "result" in daten:
+            aktuelle_url = test_url
+            session_id = daten["result"]["sessionId"]
+            login_daten = daten["result"]
+            print(f"-> Erfolg! Korrekter API-Pfad gefunden: {aktuelle_url}")
+            break
+        elif "error" in daten:
+            print(f"-> Pfad korrekt, aber Untis-Fehler: {daten['error']['message']}")
+            aktuelle_url = test_url
+            exit(1)
     except Exception:
-        print(f"SCHWERWIEGENDER FEHLER: Der Server hat kein JSON geantwortet. Statuscode: {res.status_code}")
-        print(f"Server-Antwort (erste 500 Zeichen): {res.text[:500]}")
-        raise
+        # Falls es kein JSON war (HTML-Rückgabe) oder Verbindung fehlschlug, teste nächsten Pfad
+        continue
+
+if not aktuelle_url or not session_id:
+    print("SCHWERWIEGENDER FEHLER: Es konnte kein gültiger API-Endpunkt gefunden werden. Bitte Zugangsdaten prüfen.")
+    exit(1)
 
 try:
-    # 1. Login
-    login_res = json_rpc("authenticate", {"user": USER, "password": PASSWORD, "client": "KalenderSync"})
-    if "error" in login_res:
-        print(f"Login bei WebUntis fehlgeschlagen: {login_res['error']}")
-        exit(1)
-        
-    session_id = login_res["result"]["sessionId"]
-    print("Login erfolgreich!")
-    
     # 2. Stundenplan abfragen (Nächste 30 Tage)
     heute = datetime.date.today()
     ende = heute + datetime.timedelta(days=30)
@@ -68,23 +86,19 @@ try:
     start_int = int(heute.strftime("%Y%m%d"))
     end_int = int(ende.strftime("%Y%m%d"))
     
-    elem_id = login_res["result"].get("personId", 0)
-    elem_type = login_res["result"].get("personType", 5) # 5 = Schüler
+    elem_id = login_daten.get("personId", 0)
+    elem_type = login_daten.get("personType", 5) # 5 = Schüler
     
-    timetable_res = json_rpc("getTimetable", {
+    timetable_res = json_rpc(aktuelle_url, "getTimetable", {
         "options": {
             "startDate": start_int,
             "endDate": end_int,
             "element": {"id": elem_id, "type": elem_type}
         }
-    }, session_id=session_id)
+    }, session_id=session_id).json()
     
-    if "error" in timetable_res:
-        print(f"Fehler beim Abrufen des Stundenplans: {timetable_res['error']}")
-        exit(1)
-        
     stunden = timetable_res.get("result", [])
-    print(f"{len(stunden)} Stundenplandaten empfangen.")
+    print(f"{len(stunden)} Stundenplandaten erfolgreich empfangen.")
     
     # 3. iCalendar (.ics) manuell erstellen
     ics_lines = [
@@ -109,9 +123,9 @@ try:
         raeume = [r.get("name", "") for r in s.get("ro", [])]
         lehrer = [t.get("longName", t.get("name", "")) for t in s.get("te", [])]
         
-        titel = faecher[0] if (faecher and faecher[0]) else "Unterricht"
-        ort = raeume[0] if (raeume and raeume[0]) else "Kein Raum"
-        beschreibung = f"Lehrer: {lehrer[0]}" if (lehrer and lehrer[0]) else ""
+        titel = faecher[0] if faecher else "Unterricht"
+        ort = raeume[0] if raeume else "Kein Raum"
+        beschreibung = f"Lehrer: {lehrer[0]}" if lehrer else ""
         
         start_ics = parse_untis_date_time(s["date"], s["startTime"])
         end_ics = parse_untis_date_time(s["date"], s["endTime"])
@@ -132,14 +146,14 @@ try:
     with open("stundenplan.ics", "w", encoding="utf-8") as f:
         f.write("\n".join(ics_lines))
         
-    print("Kalender-Datei erfolgreich generiert!")
+    print("Kalender-Datei (.ics) erfolgreich generiert!")
 
     # Logout
     try:
-        json_rpc("logout", session_id=session_id)
+        json_rpc(aktuelle_url, "logout", session_id=session_id)
     except Exception:
         pass
 
 except Exception as e:
-    print(f"Fehler während der Ausführung: {e}")
+    print(f"Fehler während der Verarbeitung: {e}")
     exit(1)
