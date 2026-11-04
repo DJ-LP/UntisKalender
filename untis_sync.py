@@ -4,8 +4,8 @@ from webuntis import Session
 from ics import Calendar, Event
 
 # Zugangsdaten aus den geheimen GitHub-Einstellungen laden
-SERVER = 'mariannhiller-gym.webuntis.com'
-SCHULE = 'Mariannhiller-Gym'
+SERVER = 'http://mariannhiller-gym.webuntis.com'
+SCHULE = 'mariannhiller-gym'
 USER = os.environ.get('UNTIS_USER')
 PASSWORD = os.environ.get('UNTIS_PASSWORD')
 
