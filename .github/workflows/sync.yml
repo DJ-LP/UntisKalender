@@ -19,7 +19,7 @@ jobs:
 
       - name: Abhängigkeiten installieren
         run: |
-          pip install git+https://github.com छंद/python-webuntis.git ics
+          pip install git+https://github.com ics
 
       - name: Skript ausführen
         env:
