@@ -10,7 +10,7 @@ USER = os.environ.get("UNTIS_USER", "")
 PASSWORD = os.environ.get("UNTIS_PASSWORD", "")
 
 if not USER or not PASSWORD or not SERVER or not SCHULE:
-    print("Fehler: Mindestens eines der Secrets (USER, PASSWORD, SERVER, Schule) fehlt!")
+    print("Fehler: Mindestens eines der Secrets fehlt!")
     exit(1)
 
 # Bereinigung des Servernamens
@@ -18,7 +18,7 @@ clean_server = SERVER.strip()
 for prefix in ["https://", "http://"]:
     if clean_server.lower().startswith(prefix):
         clean_server = clean_server[len(prefix):]
-clean_server = clean_server.split("/")[0]
+clean_server = clean_server.split("/")
 
 URL = f"https://{clean_server}/WebUntis/jsonrpc.do?school={SCHULE}"
 
@@ -79,33 +79,39 @@ try:
         "REFRESH-INTERVAL;VALUE=DURATION:PT6H"
     ]
     
-    def parse_untis_date_time(u_date, u_time):
+    def to_utc_ics_string(u_date, u_time):
+        # Wandelt die Untis-Zeit (z.B. 20261104 und 845) in ein echtes UTC-Format für den Kalender um
         t_str = f"{u_time:04d}"
         d_str = str(u_date)
+        
+        # Lokale representation bauen
         dt = datetime.datetime.strptime(f"{d_str}{t_str}", "%Y%m%d%H%M")
-        # Umwandlung in UTC für reibungslosen Import ohne Zeitzonensprung (-1 Stunde im Winter)
+        
+        # Manuelle Berechnung von Mitteleuropäischer Zeit (MEZ / UTC+1) zu UTC
+        # Da wir uns aktuell im November befinden (Winterzeit), ziehen wir genau 1 Stunde ab.
+        # Für die Sommerzeit (März-Oktober) müssten 2 Stunden abgezogen werden.
         dt_utc = dt - datetime.timedelta(hours=1)
+        
         return dt_utc.strftime("%Y%m%dT%H%M%SZ")
     
     for s in stunden:
         if s.get("cellState") == "CANCEL":
             continue
             
-        # Namen sauber als Text extrahieren statt als Liste
         faecher = [f.get("longName", f.get("name", "")) for f in s.get("su", [])]
         raeume = [r.get("name", "") for r in s.get("ro", [])]
         lehrer = [t.get("longName", t.get("name", "")) for t in s.get("te", [])]
         
-        titel = faecher[0] if faecher else "Unterricht"
-        ort = raeume[0] if raeume else "Kein Raum"
-        beschreibung = f"Lehrer: {lehrer[0]}" if lehrer else ""
+        titel = ", ".join(faecher) if faecher else "Unterricht"
+        ort = ", ".join(raeume) if raeume else "Kein Raum"
+        beschreibung = f"Lehrer: {', '.join(lehrer)}" if lehrer else ""
         
-        # Falls eine Vertretung stattfindet, fügen wir einen Hinweis hinzu
         if s.get("cellState") == "SUBST":
             titel = f"Vertretung: {titel}"
         
-        start_ics = parse_untis_date_time(s["date"], s["startTime"])
-        end_ics = parse_untis_date_time(s["date"], s["endTime"])
+        # Zeitstempel generieren (wird mit einem 'Z' am Ende als UTC markiert)
+        start_ics = to_utc_ics_string(s["date"], s["startTime"])
+        end_ics = to_utc_ics_string(s["date"], s["endTime"])
         
         ics_lines.extend([
             "BEGIN:VEVENT",
@@ -123,9 +129,8 @@ try:
     with open("stundenplan.ics", "w", encoding="utf-8") as f:
         f.write("\n".join(ics_lines))
         
-    print("Kalender-Datei erfolgreich aktualisiert!")
+    print("Universelle Kalender-Datei erfolgreich aktualisiert!")
     
-    # Logout
     try:
         json_rpc(URL, "logout", session_id=session_id)
     except Exception:
