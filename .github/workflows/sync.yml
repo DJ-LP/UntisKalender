@@ -2,7 +2,7 @@ name: Untis Kalender Sync
 
 on:
   schedule:
-    - cron: '0 5 * * *' # Läuft täglich um 06:00 Uhr deutscher Zeit
+    - cron: '0 5 * * *' # Täglich um 06:00 Uhr deutscher Zeit
   workflow_dispatch: # Erlaubt manuelles Starten per Klick
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
 
       - name: Abhängigkeiten installieren
         run: |
-          pip install git+https://github.com ics
+          pip install requests
 
       - name: Skript ausführen
         env:
