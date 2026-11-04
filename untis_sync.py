@@ -2,6 +2,7 @@ import datetime
 import os
 import json
 import requests
+from zoneinfo import ZoneInfo
 
 # Zugangsdaten aus den Secrets laden
 SERVER = os.environ.get("UNTIS_SERVER", "")
@@ -13,12 +14,12 @@ if not USER or not PASSWORD or not SERVER or not SCHULE:
     print("Fehler: Mindestens eines der Secrets fehlt!")
     exit(1)
 
-# Bereinigung des Servernamens
+# Bereinigung des Servernamens (holt sicher nur den Hostnamen)
 clean_server = SERVER.strip()
 for prefix in ["https://", "http://"]:
     if clean_server.lower().startswith(prefix):
         clean_server = clean_server[len(prefix):]
-clean_server = clean_server.split("/")
+clean_server = clean_server.split("/")[0]
 
 URL = f"https://{clean_server}/WebUntis/jsonrpc.do?school={SCHULE}"
 
@@ -80,18 +81,16 @@ try:
     ]
     
     def to_utc_ics_string(u_date, u_time):
-        # Wandelt die Untis-Zeit (z.B. 20261104 und 845) in ein echtes UTC-Format für den Kalender um
+        # Erstellt die korrekte Uhrzeit und wandelt sie dynamisch (egal ob Sommer- oder Winterzeit) in UTC um
         t_str = f"{u_time:04d}"
         d_str = str(u_date)
         
-        # Lokale representation bauen
-        dt = datetime.datetime.strptime(f"{d_str}{t_str}", "%Y%m%d%H%M")
+        # Als deutsche Lokalzeit einlesen
+        dt_local = datetime.datetime.strptime(f"{d_str}{t_str}", "%Y%m%d%H%M")
+        dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
         
-        # Manuelle Berechnung von Mitteleuropäischer Zeit (MEZ / UTC+1) zu UTC
-        # Da wir uns aktuell im November befinden (Winterzeit), ziehen wir genau 1 Stunde ab.
-        # Für die Sommerzeit (März-Oktober) müssten 2 Stunden abgezogen werden.
-        dt_utc = dt - datetime.timedelta(hours=1)
-        
+        # In die universelle UTC-Zeit umrechnen
+        dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
         return dt_utc.strftime("%Y%m%dT%H%M%SZ")
     
     for s in stunden:
@@ -109,7 +108,6 @@ try:
         if s.get("cellState") == "SUBST":
             titel = f"Vertretung: {titel}"
         
-        # Zeitstempel generieren (wird mit einem 'Z' am Ende als UTC markiert)
         start_ics = to_utc_ics_string(s["date"], s["startTime"])
         end_ics = to_utc_ics_string(s["date"], s["endTime"])
         
