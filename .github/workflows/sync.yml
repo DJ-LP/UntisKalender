@@ -2,7 +2,7 @@ name: Untis Kalender Sync
 
 on:
   schedule:
-    - cron: '0 5 * * *' # Täglich um 06:00 Uhr deutscher Zeit
+    - cron: '0 5 * * *' # Läuft täglich um 06:00 Uhr deutscher Zeit
   workflow_dispatch: # Erlaubt manuelles Starten per Klick
 
 jobs:
@@ -25,6 +25,8 @@ jobs:
         env:
           UNTIS_USER: ${{ secrets.UNTIS_USER }}
           UNTIS_PASSWORD: ${{ secrets.UNTIS_PASSWORD }}
+          UNTIS_SERVER: ${{ secrets.UNTIS_SERVER }}
+          UNTIS_Schule: ${{ secrets.UNTIS_Schule }}
         run: python untis_sync.py
 
       - name: Kalenderdatei auf GitHub aktualisieren
