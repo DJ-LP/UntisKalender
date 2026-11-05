@@ -14,7 +14,7 @@ if not USER or not PASSWORD or not SERVER or not SCHULE:
     print("Fehler: Mindestens eines der Secrets fehlt!")
     exit(1)
 
-# Bereinigung des Servernamens (holt sicher nur den Hostnamen)
+# Bereinigung des Servernamens
 clean_server = SERVER.strip()
 for prefix in ["https://", "http://"]:
     if clean_server.lower().startswith(prefix):
@@ -53,7 +53,19 @@ try:
     elem_id = login_res["result"].get("personId", 0)
     elem_type = login_res["result"].get("personType", 5)
     
-    # 2. Stundenplan abfragen (Nächste 30 Tage)
+    print("Login erfolgreich! Rufe Stammdaten zur Übersetzung ab...")
+    
+    # 2. Stammdaten abrufen, um IDs in echte Namen zu übersetzen
+    subjects_data = json_rpc(URL, "getSubjects", {}, session_id=session_id).get("result", [])
+    rooms_data = json_rpc(URL, "getRooms", {}, session_id=session_id).get("result", [])
+    teachers_data = json_rpc(URL, "getTeachers", {}, session_id=session_id).get("result", [])
+    
+    # ID-Mappings erstellen (Wichtig, da getTimetable nur IDs liefert)
+    sub_map = {s["id"]: s.get("longName", s.get("name", "Unterricht")) for s in subjects_data}
+    room_map = {r["id"]: r.get("name", "Kein Raum") for r in rooms_data}
+    tea_map = {t["id"]: t.get("longName", t.get("name", "")) for t in teachers_data}
+    
+    # 3. Stundenplan abfragen (Nächste 30 Tage)
     heute = datetime.date.today()
     ende = heute + datetime.timedelta(days=30)
     
@@ -69,9 +81,9 @@ try:
     }, session_id=session_id)
     
     stunden = timetable_res.get("result", [])
-    print(f"{len(stunden)} Stunden empfangen.")
+    print(f"{len(stunden)} Stunden empfangen. Verarbeite Kalender...")
     
-    # 3. iCalendar (.ics) erstellen
+    # 4. iCalendar (.ics) erstellen
     ics_lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -81,15 +93,10 @@ try:
     ]
     
     def to_utc_ics_string(u_date, u_time):
-        # Erstellt die korrekte Uhrzeit und wandelt sie dynamisch (egal ob Sommer- oder Winterzeit) in UTC um
         t_str = f"{u_time:04d}"
         d_str = str(u_date)
-        
-        # Als deutsche Lokalzeit einlesen
         dt_local = datetime.datetime.strptime(f"{d_str}{t_str}", "%Y%m%d%H%M")
         dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
-        
-        # In die universelle UTC-Zeit umrechnen
         dt_utc = dt_local.astimezone(ZoneInfo("UTC"))
         return dt_utc.strftime("%Y%m%dT%H%M%SZ")
     
@@ -97,13 +104,16 @@ try:
         if s.get("cellState") == "CANCEL":
             continue
             
-        faecher = [f.get("longName", f.get("name", "")) for f in s.get("su", [])]
-        raeume = [r.get("name", "") for r in s.get("ro", [])]
-        lehrer = [t.get("longName", t.get("name", "")) for t in s.get("te", [])]
+        # IDs über unsere Mappings in echten Text übersetzen
+        faecher = [sub_map.get(f["id"], "Unterricht") for f in s.get("su", []) if "id" in f]
+        raeume = [room_map.get(r["id"], "Kein Raum") for r in s.get("ro", []) if "id" in r]
+        lehrer = [tea_map.get(t["id"], "") for t in s.get("te", []) if "id" in t]
         
         titel = ", ".join(faecher) if faecher else "Unterricht"
         ort = ", ".join(raeume) if raeume else "Kein Raum"
-        beschreibung = f"Lehrer: {', '.join(lehrer)}" if lehrer else ""
+        
+        lehrer_liste = [l for l in lehrer if l]
+        beschreibung = f"Lehrer: {', '.join(lehrer_liste)}" if lehrer_liste else ""
         
         if s.get("cellState") == "SUBST":
             titel = f"Vertretung: {titel}"
